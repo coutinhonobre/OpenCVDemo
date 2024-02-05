@@ -63,7 +63,7 @@ internal class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(binding.root)
 
-        if (!OpenCVLoader.initDebug()) {
+        if (OpenCVLoader.initDebug(false).not()) {
             Log.e(TAG, "Unable to load OpenCV!");
         } else {
             Log.d(TAG, "OpenCV loaded successfully!");

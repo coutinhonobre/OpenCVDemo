@@ -3,6 +3,8 @@ package com.example.opencvdemo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import androidx.appcompat.app.AppCompatActivity
@@ -15,6 +17,7 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -26,6 +29,10 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.os.HandlerCompat
 import com.example.opencvdemo.databinding.ActivityMainBinding
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.objects.DetectedObject
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.CvType
@@ -46,7 +53,7 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-internal class MainActivity : AppCompatActivity() {
+@ExperimentalGetImage internal class MainActivity : AppCompatActivity() {
 
     private val binding: ActivityMainBinding by lazy {
         ActivityMainBinding.inflate(layoutInflater)
@@ -72,6 +79,8 @@ internal class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         outputDirectory = getOutputDirectory()
 
+
+
         // Verifica se todas as permissões necessárias foram concedidas
         if (allPermissionsGranted()) {
             startCamera() // Inicia a configuração da câmera se as permissões foram concedidas
@@ -96,7 +105,47 @@ internal class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun startCamera() {
+//    private fun startCamera() {
+//        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+//        cameraProviderFuture.addListener({
+//            // Usado para vincular o ciclo de vida dos casos de uso da câmera ao ciclo de vida do aplicativo
+//            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+//
+//            // Initialize o Preview
+//            val preview = Preview.Builder()
+//                .build()
+//                .also {
+//                    it.setSurfaceProvider(binding.previewView.surfaceProvider)
+//                }
+//
+//            // Initialize o ImageCapture
+//            imageCapture = ImageCapture.Builder().build()
+//
+//
+//            try {
+//                // Desvincula todos os casos de uso antes de rebinding
+//                cameraProvider.unbindAll()
+//
+//                // Bind use cases to camera
+//                cameraProvider.bindToLifecycle(
+//                    this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+//            } catch (exc: Exception) {
+//                Toast.makeText(this, "Falha ao vincular casos de uso", Toast.LENGTH_SHORT).show()
+//            }
+//
+//        }, ContextCompat.getMainExecutor(this))
+//    }
+
+    @ExperimentalGetImage private fun startCamera() {
+
+        val options = ObjectDetectorOptions.Builder()
+            .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+            .enableMultipleObjects()  // Para detectar e rastrear vários objetos
+            .enableClassification()  // Para classificar objetos em categorias gerais (opcional)
+            .build()
+
+        val objectDetector = ObjectDetection.getClient(options)
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             // Usado para vincular o ciclo de vida dos casos de uso da câmera ao ciclo de vida do aplicativo
@@ -112,19 +161,63 @@ internal class MainActivity : AppCompatActivity() {
             // Initialize o ImageCapture
             imageCapture = ImageCapture.Builder().build()
 
+            // Initialize o ImageAnalysis
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also {
+                    it.setAnalyzer(ContextCompat.getMainExecutor(this)) { imageProxy ->
+
+                        val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                        val mediaImage = imageProxy.image
+
+                        if (mediaImage != null) {
+                            val image = InputImage.fromMediaImage(mediaImage, rotationDegrees)
+
+                            // Processa a imagem com o detector de objetos
+                            objectDetector.process(image)
+                                .addOnSuccessListener { detectedObjects ->
+                                    // Trabalhe com os objetos detectados aqui
+                                    for (detectedObject in detectedObjects) {
+                                        val boundingBox = detectedObject.boundingBox
+                                        val trackingId = detectedObject.trackingId
+                                        val label = detectedObject.labels
+
+                                        Log.e("CAPTURE", "Sucesso trackingId: $trackingId")
+                                        Log.e("CAPTURE", "Sucesso label: $label")
+                                        Log.e("CAPTURE", "Sucesso label: $label")
+                                    }
+                                    runOnUiThread {
+                                        binding.boundingBoxView.setDetectedObjects(detectedObjects)
+                                    }
+                                }
+                                .addOnFailureListener { e ->
+                                    // Trate os erros aqui
+                                    Log.e("CAPTURE", "error test capture ${e.toString()}")
+                                }
+                                .addOnCompleteListener {
+                                    // Importante para evitar vazamentos de memória
+                                    imageProxy.close()
+                                }
+                        }
+
+                    }
+                }
+
             try {
                 // Desvincula todos os casos de uso antes de rebinding
                 cameraProvider.unbindAll()
 
                 // Bind use cases to camera
                 cameraProvider.bindToLifecycle(
-                    this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture)
+                    this, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageCapture, imageAnalysis)
             } catch (exc: Exception) {
                 Toast.makeText(this, "Falha ao vincular casos de uso", Toast.LENGTH_SHORT).show()
             }
 
         }, ContextCompat.getMainExecutor(this))
     }
+
 
     private fun takePhoto() {
         // Criando o arquivo de saída da imagem
